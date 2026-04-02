@@ -12,7 +12,7 @@ def stake(banca, ev):
     return round(banca * (0.02 + ev), 2)
 
 def buscar_jogos():
-    url = "https://v3.football.api-sports.io/fixtures?live=all"
+    url = "https://v3.football.api-sports.io/fixtures?date=2026-04-02"
     headers = {"x-apisports-key": API_KEY}
     res = requests.get(url, headers=headers).json()
     return res.get("response", [])
