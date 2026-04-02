@@ -1,7 +1,12 @@
 import streamlit as st
 import requests
 import pandas as pd
+def enviar_telegram(msg):
+    TOKEN = "8794081951:AAHriFzY5yj68sacN_JD4iuoZ4h8H3Su6TY"
+    CHAT_ID = "6661035382"
 
+    url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
+    requests.post(url, data={"chat_id": CHAT_ID, "text": msg})
 API_KEY = "f465d2868695fccca02d7204db0eaba"
 
 def calcular_ev(prob, odd):
