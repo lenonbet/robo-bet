@@ -1,128 +1,143 @@
 import streamlit as st
 import requests
 import pandas as pd
+import time
 
-# 🔑 CONFIG
 API_KEY = "f465d2868695fccca02d7204db0eaba"
-
 TOKEN = "8794081951:AAHriFzY5yj68sacN_JD4iuoZ4h8H3Su6TY"
 CHAT_ID = "6661035382"
 
-# 🚀 TELEGRAM
-def enviar_telegram(msg):
-    url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-    requests.post(url, data={"chat_id": CHAT_ID, "text": msg})
+alertas = set()
 
-# 📊 CALCULOS
+# ================= TELEGRAM =================
+def enviar(msg):
+    url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
+    try:
+        requests.post(url, data={"chat_id": CHAT_ID, "text": msg})
+    except:
+        pass
+
+# ================= MATEMÁTICA PROFISSIONAL =================
+
+def prob_implicita(odd):
+    return 1 / odd
+
 def calcular_ev(prob, odd):
     return (prob * odd) - 1
 
-def stake(banca, ev):
-    return round(banca * (0.02 + ev), 2)
+def kelly(prob, odd, banca):
+    b = odd - 1
+    q = 1 - prob
+    stake = (b * prob - q) / b
+    return max(0, round(stake * banca, 2))
 
-# ================= FUTEBOL =================
+# ================= DADOS AO VIVO =================
 
-def buscar_futebol():
-    url = "https://v3.football.api-sports.io/fixtures?date=2026-04-02"
+def buscar_jogos():
+    url = "https://v3.football.api-sports.io/fixtures?live=all"
     headers = {"x-apisports-key": API_KEY}
     res = requests.get(url, headers=headers).json()
     return res.get("response", [])
 
-def analisar_futebol():
-    jogos = buscar_futebol()
+# ================= MODELO INTELIGENTE =================
+
+def calcular_probabilidade(gols, tempo):
+    # ritmo de jogo
+    ritmo = gols / max(tempo, 1)
+
+    # modelo melhorado
+    base = 0.48
+    ajuste = ritmo * 2.2
+
+    prob = base + ajuste
+
+    return min(max(prob, 0.05), 0.92)
+
+# ================= ANÁLISE =================
+
+def analisar(banca):
+    jogos = buscar_jogos()
     dados = []
 
-    for j in jogos[:30]:
-        casa = j['teams']['home']['name']
-        fora = j['teams']['away']['name']
-        g1 = j['goals']['home'] or 0
-        g2 = j['goals']['away'] or 0
+    for j in jogos:
+        try:
+            casa = j['teams']['home']['name']
+            fora = j['teams']['away']['name']
+            tempo = j['fixture']['status']['elapsed'] or 1
 
-        total = g1 + g2
+            g1 = j['goals']['home'] or 0
+            g2 = j['goals']['away'] or 0
+            total = g1 + g2
 
-        prob_over = min(0.55 + total * 0.1, 0.85)
-        prob_btts = min(0.50 + total * 0.08, 0.80)
-        prob_ht = min(0.45 + total * 0.08, 0.75)
+            # 🔴 FILTRO PROFISSIONAL
+            if tempo < 20:
+                continue
 
-        odd = 1.90
+            prob = calcular_probabilidade(total, tempo)
 
-        # 🔥 OVER 2.5
-        ev_over = calcular_ev(prob_over, odd)
-        if ev_over > 0.15 and total > 1:
-            msg = f"🔥 FUTEBOL\n{casa} x {fora}\nOver 2.5\nEV: {round(ev_over,2)}"
-            enviar_telegram(msg)
+            # 🎯 simulação de odd de mercado
+            odd = 1.75
 
-            dados.append([f"{casa} x {fora}", "Over 2.5", prob_over, odd])
+            ev = calcular_ev(prob, odd)
 
-        # 🔥 BTTS
-        ev_btts = calcular_ev(prob_btts, odd)
-        if ev_btts > 0.15 and total > 1:
-            msg = f"🔥 FUTEBOL\n{casa} x {fora}\nBTTS\nEV: {round(ev_btts,2)}"
-            enviar_telegram(msg)
+            # 🔥 SÓ ENTRADA FORTE
+            if ev < 0.15:
+                continue
 
-            dados.append([f"{casa} x {fora}", "BTTS", prob_btts, odd])
+            stake_valor = kelly(prob, odd, banca)
 
-        # 🔥 HT
-        ev_ht = calcular_ev(prob_ht, odd)
-        if ev_ht > 0.15:
-            msg = f"🔥 FUTEBOL\n{casa} x {fora}\nOver HT\nEV: {round(ev_ht,2)}"
-            enviar_telegram(msg)
+            jogo_id = f"{casa}-{fora}"
 
-            dados.append([f"{casa} x {fora}", "Over HT", prob_ht, odd])
+            if jogo_id not in alertas:
+                msg = f"""💰 VALUE BET FORTE
 
-    return dados
+{casa} x {fora}
+⏱ {tempo} min
 
-# ================= NBA =================
+⚽ Over 2.5
+📊 Prob: {round(prob,2)}
+🎯 Odd: {odd}
+💸 EV: {round(ev,2)}
+💰 Stake: R${stake_valor}
+"""
+                enviar(msg)
+                alertas.add(jogo_id)
 
-def buscar_nba():
-    url = "https://v1.basketball.api-sports.io/games?date=2026-04-02"
-    headers = {"x-apisports-key": API_KEY}
-    res = requests.get(url, headers=headers).json()
-    return res.get("response", [])
+            dados.append([
+                f"{casa} x {fora}",
+                tempo,
+                total,
+                prob,
+                odd,
+                ev,
+                stake_valor
+            ])
 
-def analisar_nba():
-    jogos = buscar_nba()
-    dados = []
-
-    for j in jogos[:15]:
-        casa = j['teams']['home']['name']
-        fora = j['teams']['away']['name']
-
-        pontos_casa = j['scores']['home']['points'] or 0
-        pontos_fora = j['scores']['away']['points'] or 0
-
-        total = pontos_casa + pontos_fora
-
-        prob_over = min(0.60 + total * 0.002, 0.85)
-        odd = 1.90
-        ev = calcular_ev(prob_over, odd)
-
-        if ev > 0.15 and total > 180:
-            msg = f"🏀 NBA\n{casa} x {fora}\nOver Pontos\nEV: {round(ev,2)}"
-            enviar_telegram(msg)
-
-            dados.append([f"{casa} x {fora}", "Over Pontos", prob_over, odd])
+        except:
+            continue
 
     return dados
 
 # ================= APP =================
 
-st.title("🔥 ROBÔ ELITE (FUTEBOL + NBA + TELEGRAM)")
+st.title("💰 ROBÔ TOP 1% - VALUE BET PROFISSIONAL")
 
 banca = st.number_input("💰 Sua banca", value=1000)
 
-if st.button("🚀 Buscar Entradas ELITE"):
+status = st.empty()
 
-    dados_fut = analisar_futebol()
-    dados_nba = analisar_nba()
+while True:
+    status.warning("🔄 Analisando jogos AO VIVO...")
 
-    dados_total = dados_fut + dados_nba
+    dados = analisar(banca)
 
-    if dados_total:
-        df = pd.DataFrame(dados_total, columns=["Jogo", "Mercado", "Prob", "Odd"])
-        df["EV"] = df.apply(lambda x: calcular_ev(x["Prob"], x["Odd"]), axis=1)
-        df["Stake"] = df["EV"].apply(lambda x: stake(banca, x))
+    if dados:
+        df = pd.DataFrame(dados, columns=[
+            "Jogo", "Min", "Gols", "Prob", "Odd", "EV", "Stake"
+        ])
 
         st.dataframe(df.sort_values(by="EV", ascending=False))
     else:
-        st.warning("Sem boas entradas agora")
+        st.info("Nenhuma entrada forte agora")
+
+    time.sleep(180)
