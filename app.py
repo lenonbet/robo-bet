@@ -42,8 +42,8 @@ def analisar_futebol():
         odd = 1.90
 
         if calcular_ev(prob_over, odd) > 0.12:
-            dados.append([f"{casa} x {fora}", "Over 2.5", prob_over, odd])
-
+    msg = f"🔥 ENTRADA\n{casa} x {fora}\nOver 2.5\nEV: {round(calcular_ev(prob_over, odd),2)}"
+    enviar_telegram(msg)
         if calcular_ev(prob_btts, odd) > 0.12:
             dados.append([f"{casa} x {fora}", "BTTS", prob_btts, odd])
 
