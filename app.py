@@ -1,9 +1,8 @@
 import streamlit as st
 import requests
 import pandas as pd
-import numpy as np
 
-API_KEY = "af465d2868695fccca02d7204db0eaba"
+API_KEY = "f465d2868695fccca02d7204db0eaba"
 
 def calcular_ev(prob, odd):
     return (prob * odd) - 1
@@ -11,47 +10,92 @@ def calcular_ev(prob, odd):
 def stake(banca, ev):
     return round(banca * (0.02 + ev), 2)
 
-def buscar_jogos():
+# ================= FUTEBOL =================
+
+def buscar_futebol():
     url = "https://v3.football.api-sports.io/fixtures?date=2026-04-02"
     headers = {"x-apisports-key": API_KEY}
     res = requests.get(url, headers=headers).json()
     return res.get("response", [])
 
-def analisar():
-    jogos = buscar_jogos()
+def analisar_futebol():
+    jogos = buscar_futebol()
     dados = []
 
-    for j in jogos[:10]:
+    for j in jogos[:30]:
         casa = j['teams']['home']['name']
         fora = j['teams']['away']['name']
         g1 = j['goals']['home'] or 0
         g2 = j['goals']['away'] or 0
 
         total = g1 + g2
-        prob = min(0.55 + total*0.1, 0.85)
-        odd = 1.90
-        ev = calcular_ev(prob, odd)
 
-        if ev > 0.1:
-            dados.append({
-                "Jogo": f"{casa} x {fora}",
-                "Mercado": "Over 2.5",
-                "Prob": round(prob,2),
-                "Odd": odd,
-                "EV": round(ev,2)
-            })
+        prob_over = min(0.55 + total * 0.1, 0.85)
+        prob_btts = min(0.50 + (g1+g2)*0.08, 0.80)
+        prob_ht = min(0.45 + total * 0.08, 0.75)
+
+        odd = 1.90
+
+        if calcular_ev(prob_over, odd) > 0.12:
+            dados.append([f"{casa} x {fora}", "Over 2.5", prob_over, odd])
+
+        if calcular_ev(prob_btts, odd) > 0.12:
+            dados.append([f"{casa} x {fora}", "BTTS", prob_btts, odd])
+
+        if calcular_ev(prob_ht, odd) > 0.12:
+            dados.append([f"{casa} x {fora}", "Over HT", prob_ht, odd])
 
     return dados
 
-st.title("🚀 Robô com Dados Reais")
+# ================= NBA =================
 
-banca = st.number_input("Banca", value=1000)
+def buscar_nba():
+    url = "https://v1.basketball.api-sports.io/games?date=2026-04-02"
+    headers = {"x-apisports-key": API_KEY}
+    res = requests.get(url, headers=headers).json()
+    return res.get("response", [])
 
-if st.button("Buscar Entradas"):
-    dados = analisar()
-    if dados:
-        df = pd.DataFrame(dados)
-        df['Stake'] = df['EV'].apply(lambda x: stake(banca, x))
-        st.dataframe(df)
+def analisar_nba():
+    jogos = buscar_nba()
+    dados = []
+
+    for j in jogos[:15]:
+        casa = j['teams']['home']['name']
+        fora = j['teams']['away']['name']
+
+        pontos_casa = j['scores']['home']['points'] or 0
+        pontos_fora = j['scores']['away']['points'] or 0
+
+        total = pontos_casa + pontos_fora
+
+        # modelo simples de over pontos
+        prob_over = min(0.55 + total * 0.002, 0.80)
+        odd = 1.90
+        ev = calcular_ev(prob_over, odd)
+
+        if ev > 0.10:
+            dados.append([f"{casa} x {fora}", "Over Pontos", prob_over, odd])
+
+    return dados
+
+# ================= APP =================
+
+st.title("🔥 ROBÔ ELITE (FUTEBOL + NBA)")
+
+banca = st.number_input("💰 Sua banca", value=1000)
+
+if st.button("🚀 Buscar Entradas ELITE"):
+
+    dados_fut = analisar_futebol()
+    dados_nba = analisar_nba()
+
+    dados_total = dados_fut + dados_nba
+
+    if dados_total:
+        df = pd.DataFrame(dados_total, columns=["Jogo", "Mercado", "Prob", "Odd"])
+        df["EV"] = df.apply(lambda x: calcular_ev(x["Prob"], x["Odd"]), axis=1)
+        df["Stake"] = df["EV"].apply(lambda x: stake(banca, x))
+
+        st.dataframe(df.sort_values(by="EV", ascending=False))
     else:
-        st.warning("Sem jogos ao vivo agora")
+        st.warning("Sem boas entradas agora")
