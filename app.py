@@ -54,9 +54,8 @@ def carregar_historico():
     return pd.DataFrame(json.loads(HISTORICO_FILE.read_text()))
 
 # ================= BUSCAR JOGOS =================
-def buscar_jogos_football(live=False):
-    hoje_utc = datetime.datetime.utcnow().strftime("%Y-%m-%d")
-    url = f"https://v3.football.api-sports.io/fixtures?date={hoje_utc}" if not live else "https://v3.football.api-sports.io/fixtures?live=all"
+def buscar_jogos_football(data, live=False):
+    url = f"https://v3.football.api-sports.io/fixtures?date={data}" if not live else "https://v3.football.api-sports.io/fixtures?live=all"
     headers = {"x-apisports-key": API_KEY_FOOT}
     try:
         return requests.get(url, headers=headers, timeout=10).json().get("response", [])
@@ -69,7 +68,7 @@ def filtrar_jogos(jogos, campeonatos):
     return [j for j in jogos if j.get("league", {}).get("name") in campeonatos]
 
 # ================= MERCADOS =================
-def gerar_mercados(jogo, banca, ao_vivo=False):
+def gerar_mercados(jogo, banca, mercados_selecionados, ao_vivo=False):
     mercados = []
     casa = jogo.get('teams', {}).get('home', {}).get('name','Desconhecido')
     fora = jogo.get('teams', {}).get('away', {}).get('name','Desconhecido')
@@ -78,27 +77,28 @@ def gerar_mercados(jogo, banca, ao_vivo=False):
     g2 = jogo.get('goals', {}).get('away') or 0
     total = g1 + g2
 
-    # Over 2.5
-    odd = jogo.get('odds', {}).get('over25', round(1.8,2))  # se não existir, usar valor simulado
-    prob = prob_ao_vivo(total, tempo) if ao_vivo else prob_pre_jogo(odd)
-    ev = calcular_ev(prob, odd)
-    stake = kelly(prob, odd, banca)
-    mercados.append({"Mercado":"Over 2.5","Odd":odd,"Prob":prob,"EV":ev,"Stake":stake})
-
-    # Ambas marcam
-    odd = jogo.get('odds', {}).get('both_score', round(1.85,2))
-    prob = prob_ao_vivo(total, tempo) if ao_vivo else prob_pre_jogo(odd)
-    ev = calcular_ev(prob, odd)
-    stake = kelly(prob, odd, banca)
-    mercados.append({"Mercado":"Ambas Marcam","Odd":odd,"Prob":prob,"EV":ev,"Stake":stake})
-
-    # Resultado 1X2
-    for resultado in ["1","X","2"]:
-        odd = jogo.get('odds', {}).get(f'result_{resultado}', round(2.5,2))
-        prob = prob_pre_jogo(odd)
+    resultados = []
+    if "Over 2.5" in mercados_selecionados:
+        odd = round(1.8,2)
+        prob = prob_ao_vivo(total, tempo) if ao_vivo else prob_pre_jogo(odd)
         ev = calcular_ev(prob, odd)
         stake = kelly(prob, odd, banca)
-        mercados.append({"Mercado":f"Resultado {resultado}","Odd":odd,"Prob":prob,"EV":ev,"Stake":stake})
+        mercados.append({"Mercado":"Over 2.5","Odd":odd,"Prob":prob,"EV":ev,"Stake":stake})
+
+    if "Ambas Marcam" in mercados_selecionados:
+        odd = round(1.85,2)
+        prob = prob_ao_vivo(total, tempo) if ao_vivo else prob_pre_jogo(odd)
+        ev = calcular_ev(prob, odd)
+        stake = kelly(prob, odd, banca)
+        mercados.append({"Mercado":"Ambas Marcam","Odd":odd,"Prob":prob,"EV":ev,"Stake":stake})
+
+    for r in ["1","X","2"]:
+        if f"Resultado {r}" in mercados_selecionados:
+            odd = round(2.5,2)
+            prob = prob_pre_jogo(odd)
+            ev = calcular_ev(prob, odd)
+            stake = kelly(prob, odd, banca)
+            mercados.append({"Mercado":f"Resultado {r}","Odd":odd,"Prob":prob,"EV":ev,"Stake":stake})
 
     return mercados, casa, fora, tempo
 
@@ -108,6 +108,8 @@ st.title("💰 ROBÔ PROFISSIONAL - FUTEBOL AO VIVO & PRÉ-JOGO")
 banca = st.number_input("💰 Sua banca", value=1000)
 modo = st.selectbox("Modo de Análise", ["PRÉ-JOGO","AO VIVO","TODOS"])
 manual = st.checkbox("Selecionar jogos manualmente")
+mercados_selecionados = st.multiselect("Selecione mercados a analisar", ["Over 2.5","Ambas Marcam","Resultado 1","Resultado X","Resultado 2"], default=["Over 2.5","Ambas Marcam","Resultado 1","Resultado X","Resultado 2"])
+dias_futuros = st.slider("Quantos dias à frente analisar?", 0, 3, 0)
 
 status = st.empty()
 
@@ -115,10 +117,12 @@ while True:
     status.warning("🔄 Analisando jogos...")
 
     jogos = []
-    if modo in ["PRÉ-JOGO","TODOS"]:
-        jogos += filtrar_jogos(buscar_jogos_football(live=False), PRINCIPAIS_FOOT)
-    if modo in ["AO VIVO","TODOS"]:
-        jogos += filtrar_jogos(buscar_jogos_football(live=True), PRINCIPAIS_FOOT)
+    datas = [(datetime.datetime.utcnow() + datetime.timedelta(days=i)).strftime("%Y-%m-%d") for i in range(dias_futuros+1)]
+    for data in datas:
+        if modo in ["PRÉ-JOGO","TODOS"]:
+            jogos += filtrar_jogos(buscar_jogos_football(data, live=False), PRINCIPAIS_FOOT)
+        if modo in ["AO VIVO","TODOS"] and data == datas[0]:
+            jogos += filtrar_jogos(buscar_jogos_football(data, live=True), PRINCIPAIS_FOOT)
 
     # ================= SELEÇÃO MANUAL =================
     if manual and jogos:
@@ -128,7 +132,7 @@ while True:
 
     tabela = []
     for j in jogos:
-        mercados, casa, fora, tempo = gerar_mercados(j, banca, ao_vivo=(modo=="AO VIVO"))
+        mercados, casa, fora, tempo = gerar_mercados(j, banca, mercados_selecionados, ao_vivo=(modo=="AO VIVO"))
         row = [casa, fora, tempo]
         for m in mercados:
             row += [m["Mercado"], m["Odd"], round(m["Prob"],2), round(m["EV"],2), m["Stake"]]
@@ -143,7 +147,7 @@ while True:
 
     if tabela:
         col_names = ["Casa","Fora","Min"]
-        for i in range(3):  # 3 mercados
+        for i in range(len(mercados_selecionados)):
             col_names += [f"Mercado{i+1}","Odd{i+1}","Prob{i+1}","EV{i+1}","Stake{i+1}"]
         df = pd.DataFrame(tabela, columns=col_names)
         st.dataframe(df)
@@ -154,3 +158,4 @@ while True:
     st.dataframe(carregar_historico())
 
     time.sleep(180)
+   
