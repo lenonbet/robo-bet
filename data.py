@@ -1,9 +1,8 @@
 import requests
 
-API_KEY = "SUA_API_AQUI"
+API_KEY = "715022b452a043a2977b885ce60e6da7"
 
 def buscar_jogos():
-
     url = "https://api.football-data.org/v4/matches"
 
     headers = {
