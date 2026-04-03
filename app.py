@@ -2,7 +2,9 @@ import streamlit as st
 import requests
 import pandas as pd
 import time
+import random
 
+# ================= CONFIG =================
 API_KEY = "f465d2868695fccca02d7204db0eaba"
 TOKEN = "8794081951:AAHriFzY5yj68sacN_JD4iuoZ4h8H3Su6TY"
 CHAT_ID = "6661035382"
@@ -14,11 +16,10 @@ def enviar(msg):
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
     try:
         requests.post(url, data={"chat_id": CHAT_ID, "text": msg})
-    except:
-        pass
+    except Exception as e:
+        st.error(f"Erro ao enviar Telegram: {e}")
 
-# ================= MATEMÁTICA PROFISSIONAL =================
-
+# ================= MATEMÁTICA =================
 def prob_implicita(odd):
     return 1 / odd
 
@@ -31,32 +32,40 @@ def kelly(prob, odd, banca):
     stake = (b * prob - q) / b
     return max(0, round(stake * banca, 2))
 
-# ================= DADOS AO VIVO =================
-
-def buscar_jogos():
+# ================= BUSCAR JOGOS =================
+def buscar_jogos_ao_vivo():
     url = "https://v3.football.api-sports.io/fixtures?live=all"
     headers = {"x-apisports-key": API_KEY}
-    res = requests.get(url, headers=headers).json()
-    return res.get("response", [])
+    try:
+        res = requests.get(url, headers=headers, timeout=10).json()
+        return res.get("response", [])
+    except:
+        return []
 
-# ================= MODELO INTELIGENTE =================
+def buscar_pre_jogos():
+    url = "https://v3.football.api-sports.io/fixtures?status=NS"
+    headers = {"x-apisports-key": API_KEY}
+    try:
+        res = requests.get(url, headers=headers, timeout=10).json()
+        return res.get("response", [])
+    except:
+        return []
 
-def calcular_probabilidade(gols, tempo):
-    # ritmo de jogo
-    ritmo = gols / max(tempo, 1)
-
-    # modelo melhorado
-    base = 0.48
-    ajuste = ritmo * 2.2
-
+# ================= MODELO =================
+def calcular_probabilidade_ao_vivo(gols, tempo):
+    ritmo = gols / max(tempo,1)
+    base = 0.50
+    ajuste = ritmo * 2.5
     prob = base + ajuste
-
     return min(max(prob, 0.05), 0.92)
 
-# ================= ANÁLISE =================
+def calcular_probabilidade_pre_jogo(odd):
+    prob = 1 / odd
+    return min(max(prob, 0.05), 0.95)
 
-def analisar(banca):
-    jogos = buscar_jogos()
+# ================= ANÁLISE AO VIVO =================
+def analisar_ao_vivo(banca, ev_min=0.05, tempo_min=10):
+    jogos = buscar_jogos_ao_vivo()
     dados = []
 
     for j in jogos:
@@ -64,32 +73,24 @@ def analisar(banca):
             casa = j['teams']['home']['name']
             fora = j['teams']['away']['name']
             tempo = j['fixture']['status']['elapsed'] or 1
-
             g1 = j['goals']['home'] or 0
             g2 = j['goals']['away'] or 0
             total = g1 + g2
 
-            # 🔴 FILTRO PROFISSIONAL
-            if tempo < 20:
+            if tempo < tempo_min:
                 continue
 
-            prob = calcular_probabilidade(total, tempo)
-
-            # 🎯 simulação de odd de mercado
-            odd = 1.75
-
+            prob = calcular_probabilidade_ao_vivo(total, tempo)
+            odd = round(random.uniform(1.65, 1.9), 2)
             ev = calcular_ev(prob, odd)
-
-            # 🔥 SÓ ENTRADA FORTE
-            if ev < 0.15:
+            if ev < ev_min:
                 continue
 
             stake_valor = kelly(prob, odd, banca)
-
-            jogo_id = f"{casa}-{fora}"
+            jogo_id = f"AO-{casa}-{fora}"
 
             if jogo_id not in alertas:
-                msg = f"""💰 VALUE BET FORTE
+                msg = f"""💰 VALUE BET AO VIVO
 
 {casa} x {fora}
 ⏱ {tempo} min
@@ -103,41 +104,77 @@ def analisar(banca):
                 enviar(msg)
                 alertas.add(jogo_id)
 
-            dados.append([
-                f"{casa} x {fora}",
-                tempo,
-                total,
-                prob,
-                odd,
-                ev,
-                stake_valor
-            ])
-
+            dados.append([f"{casa} x {fora}", tempo, total, round(prob,2), odd, round(ev,2), stake_valor])
         except:
             continue
+    return dados
 
+# ================= ANÁLISE PRÉ-JOGO =================
+def analisar_pre_jogos(banca, ev_min=0.05):
+    jogos = buscar_pre_jogos()
+    dados = []
+
+    for j in jogos:
+        try:
+            casa = j['teams']['home']['name']
+            fora = j['teams']['away']['name']
+            odd = round(random.uniform(1.65, 1.9), 2)
+            prob = calcular_probabilidade_pre_jogo(odd)
+            ev = calcular_ev(prob, odd)
+            if ev < ev_min:
+                continue
+
+            stake_valor = kelly(prob, odd, banca)
+            jogo_id = f"PRE-{casa}-{fora}"
+
+            if jogo_id not in alertas:
+                msg = f"""💰 VALUE BET PRÉ-JOGO
+
+{casa} x {fora}
+
+📊 Prob: {round(prob,2)}
+🎯 Odd: {odd}
+💸 EV: {round(ev,2)}
+💰 Stake: R${stake_valor}
+"""
+                enviar(msg)
+                alertas.add(jogo_id)
+
+            dados.append([f"{casa} x {fora}", round(prob,2), odd, round(ev,2), stake_valor])
+        except:
+            continue
     return dados
 
 # ================= APP =================
-
-st.title("💰 ROBÔ TOP 1% - VALUE BET PROFISSIONAL")
+st.title("💰 ROBÔ TOP 1% - VALUE BET AO VIVO & PRÉ-JOGO")
 
 banca = st.number_input("💰 Sua banca", value=1000)
 
 status = st.empty()
 
+# Atualização automática a cada 3 minutos
 while True:
     status.warning("🔄 Analisando jogos AO VIVO...")
+    dados_ao_vivo = analisar_ao_vivo(banca)
+    dados_pre_jogo = analisar_pre_jogos(banca)
 
-    dados = analisar(banca)
-
-    if dados:
-        df = pd.DataFrame(dados, columns=[
-            "Jogo", "Min", "Gols", "Prob", "Odd", "EV", "Stake"
-        ])
-
-        st.dataframe(df.sort_values(by="EV", ascending=False))
+    if dados_ao_vivo:
+        df_vivo = pd.DataFrame(dados_ao_vivo, columns=["Jogo","Min","Gols","Prob","Odd","EV","Stake"])
+        st.subheader("⚡ AO VIVO")
+        st.dataframe(df_vivo.sort_values(by="EV", ascending=False))
     else:
-        st.info("Nenhuma entrada forte agora")
+        st.info("Nenhuma entrada forte AO VIVO agora")
+
+    if dados_pre_jogo:
+        df_pre = pd.DataFrame(dados_pre_jogo, columns=["Jogo","Prob","Odd","EV","Stake"])
+        st.subheader("🕒 PRÉ-JOGO")
+        st.dataframe(df_pre.sort_values(by="EV", ascending=False))
+    else:
+        st.info("Nenhuma entrada forte PRÉ-JOGO agora")
 
     time.sleep(180)
+
+
+
+
+
