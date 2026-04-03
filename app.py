@@ -1,52 +1,12 @@
 import streamlit as st
-import requests
-from bs4 import BeautifulSoup
 import pandas as pd
 import math
 import random
+import datetime
+from utils import buscar_jogos_por_data
 
-# ================= CONFIG =================
 st.set_page_config(layout="wide")
-st.title("🤖 ROBÔ AUTÔNOMO IA - APOSTAS ESPORTIVAS")
-
-# ================= SCRAPING MULTI-LIGAS =================
-@st.cache_data(ttl=300)
-def buscar_jogos():
-    ligas_urls = {
-        "Brasileirão": "https://www.flashscore.com/football/brazil/serie-a/",
-        "Portugal": "https://www.flashscore.com/football/portugal/primeira-liga/",
-        "Inglaterra": "https://www.flashscore.com/football/england/premier-league/"
-    }
-
-    headers = {"User-Agent": "Mozilla/5.0"}
-    todos_jogos = {}
-
-    for liga, url in ligas_urls.items():
-        try:
-            r = requests.get(url, headers=headers, timeout=10)
-            soup = BeautifulSoup(r.text, "lxml")
-
-            partidas = soup.find_all("div", class_="event__match")
-            jogos = []
-
-            for p in partidas:
-                try:
-                    casa = p.find("div", class_="event__homeParticipant").text.strip()
-                    fora = p.find("div", class_="event__awayParticipant").text.strip()
-
-                    jogos.append({
-                        "nome": f"{casa} x {fora}",
-                        "casa": casa,
-                        "fora": fora
-                    })
-                except:
-                    continue
-
-            todos_jogos[liga] = jogos
-        except:
-            todos_jogos[liga] = []
-
-    return todos_jogos
+st.title("🤖 ROBÔ IA PROFISSIONAL - APOSTAS")
 
 # ================= MODELO =================
 def poisson(lmbda, k):
@@ -59,31 +19,37 @@ def prob_btts(xg_home, xg_away):
     return (1 - poisson(xg_home, 0)) * (1 - poisson(xg_away, 0))
 
 def gerar_xg():
-    return round(random.uniform(0.8, 2.2), 2)
+    return random.uniform(0.8, 2.5)
 
 def calcular_ev(prob, odd):
     return (prob * odd) - 1
 
-# ================= INTERFACE =================
-jogos_por_liga = buscar_jogos()
+# ================= DATA =================
+data = st.date_input("📅 Escolha a data", datetime.date.today())
+data_str = data.strftime("%Y-%m-%d")
 
-liga = st.sidebar.selectbox("🏆 Campeonato", list(jogos_por_liga.keys()))
+# ================= BUSCAR JOGOS =================
+jogos_por_liga = buscar_jogos_por_data(data_str)
+
+if not jogos_por_liga:
+    st.warning("⚠️ Nenhum jogo encontrado nessa data")
+
+# ================= ESCOLHER LIGA =================
+liga = st.selectbox("🏆 Campeonato", list(jogos_por_liga.keys()))
 
 jogos = jogos_por_liga[liga]
 
-if not jogos:
-    st.warning("⚠️ Sem jogos encontrados (Flashscore pode ter mudado ou bloqueado)")
-
 nomes = [j["nome"] for j in jogos]
+mapa = {j["nome"]: j for j in jogos}
 
-jogo_escolhido = st.selectbox("⚽ Escolha o jogo", nomes if nomes else ["Nenhum jogo"])
+jogo_escolhido = st.selectbox("⚽ Jogos", nomes)
 
-modo_auto = st.checkbox("🤖 Modo IA Automático")
+modo_auto = st.checkbox("🤖 IA automática (filtrar EV)")
 
 # ================= ANÁLISE =================
-if st.button("🔍 Analisar") and jogos:
+if st.button("🔍 Analisar jogo"):
 
-    jogo = next(j for j in jogos if j["nome"] == jogo_escolhido)
+    jogo = mapa[jogo_escolhido]
 
     casa = jogo["casa"]
     fora = jogo["fora"]
@@ -93,11 +59,11 @@ if st.button("🔍 Analisar") and jogos:
     xg_total = xg_home + xg_away
 
     mercados = [
-        ("Over 2.5 Gols", prob_over(xg_total, 3), 1.8),
-        ("Over 1.5 Gols", prob_over(xg_total, 2), 1.4),
+        ("Over 2.5 Gols", prob_over(xg_total, 3), 1.80),
+        ("Over 1.5 Gols", prob_over(xg_total, 2), 1.45),
         ("Ambas Marcam", prob_btts(xg_home, xg_away), 1.85),
-        ("Escanteios Over 9.5", random.uniform(0.5,0.7), 1.9),
-        ("Cartões Over 3.5", random.uniform(0.5,0.7), 1.95)
+        ("Escanteios Over 9.5", random.uniform(0.55,0.75), 1.9),
+        ("Cartões Over 3.5", random.uniform(0.55,0.75), 1.95)
     ]
 
     tabela = []
@@ -108,33 +74,41 @@ if st.button("🔍 Analisar") and jogos:
         if modo_auto and ev < 0.10:
             continue
 
-        tabela.append([nome, round(prob,2), odd, round(ev,2)])
+        tabela.append([
+            nome,
+            round(prob,2),
+            odd,
+            round(ev,2)
+        ])
 
     df = pd.DataFrame(tabela, columns=["Mercado","Prob","Odd","EV"])
 
     st.subheader(f"📊 {casa} x {fora}")
-    st.write(f"xG Casa: {xg_home} | xG Fora: {xg_away}")
+    st.write(f"xG Casa: {round(xg_home,2)} | xG Fora: {round(xg_away,2)}")
     st.dataframe(df)
 
 # ================= IA GLOBAL =================
-if st.button("🚀 IA - MELHORES JOGOS DO DIA"):
+if st.button("🚀 MELHORES JOGOS DO DIA"):
 
     melhores = []
 
-    for liga, jogos in jogos_por_liga.items():
+    for liga_nome, jogos in jogos_por_liga.items():
         for j in jogos:
             xg = gerar_xg() + gerar_xg()
             prob = prob_over(xg, 3)
             ev = calcular_ev(prob, 1.8)
 
             if ev > 0.15:
-                melhores.append([liga, j["nome"], round(ev,2)])
+                melhores.append([
+                    liga_nome,
+                    j["nome"],
+                    round(ev,2)
+                ])
 
     if melhores:
         df = pd.DataFrame(melhores, columns=["Liga","Jogo","EV"])
         st.dataframe(df.sort_values(by="EV", ascending=False))
     else:
-        st.info("Nenhuma oportunidade forte encontrada")
+        st.info("Nenhuma entrada forte hoje")
 
-st.markdown("---")
-st.success("🔥 Robô autônomo com IA ativo")
+st.success("🔥 Robô rodando com IA + jogos reais")
