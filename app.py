@@ -1,180 +1,204 @@
 import streamlit as st
 import requests
 import pandas as pd
-import datetime
 import time
+import math
+import os
 
 # ================= CONFIG =================
 API_KEY = "f465d2868695fccca02d7204db0eaba"
 TOKEN = "8794081951:AAHriFzY5yj68sacN_JD4iuoZ4h8H3Su6TY"
 CHAT_ID = "6661035382"
 
-LIGAS_IDS = [
-    71,   # Brasileirão
-    39,   # Premier League
-    140,  # La Liga
-    135,  # Serie A Itália
-    78,   # Bundesliga
-    61,   # Ligue 1
-    94,   # Liga Portugal
-    2     # Champions League
-]
+ODD_PADRAO = 1.80
+EV_MINIMO = 0.05
+KELLY_FRACAO = 0.25
+
+ARQUIVO = "historico.csv"
+
+headers = {"x-apisports-key": API_KEY}
 
 # ================= TELEGRAM =================
 def enviar(msg):
-    url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
     try:
-        requests.post(url, data={"chat_id": CHAT_ID, "text": msg})
+        requests.post(
+            f"https://api.telegram.org/bot{TOKEN}/sendMessage",
+            data={"chat_id": CHAT_ID, "text": msg}
+        )
     except:
         pass
 
-# ================= CÁLCULOS =================
+# ================= MATEMÁTICA =================
+def poisson(lmbda, k):
+    return (lmbda**k * math.exp(-lmbda)) / math.factorial(k)
+
+def prob_over_25(xg):
+    return 1 - sum(poisson(xg, i) for i in range(3))
+
+def prob_btts(xg_home, xg_away):
+    return (1 - poisson(xg_home, 0)) * (1 - poisson(xg_away, 0))
+
 def calcular_ev(prob, odd):
     return (prob * odd) - 1
 
 def kelly(prob, odd, banca):
     b = odd - 1
     q = 1 - prob
-    stake = (b * prob - q) / b
-    return max(0, round(stake * banca, 2))
+    k = (b * prob - q) / b
+    return max(0, round(k * banca * KELLY_FRACAO, 2))
 
-# ================= BUSCAR JOGOS =================
-def buscar_jogos(data):
-    headers = {"x-apisports-key": API_KEY}
-    jogos_total = []
+# ================= DADOS =================
+def jogos_hoje():
+    url = "https://v3.football.api-sports.io/fixtures?next=30"
+    return requests.get(url, headers=headers).json().get("response", [])
 
-    for liga in LIGAS_IDS:
+def jogos_ao_vivo():
+    url = "https://v3.football.api-sports.io/fixtures?live=all"
+    return requests.get(url, headers=headers).json().get("response", [])
+
+def ultimos_jogos(team_id):
+    url = f"https://v3.football.api-sports.io/fixtures?team={team_id}&last=5"
+    return requests.get(url, headers=headers).json().get("response", [])
+
+# ================= IA SIMPLES =================
+def salvar(dados):
+    df = pd.DataFrame([dados])
+
+    if os.path.exists(ARQUIVO):
+        df.to_csv(ARQUIVO, mode='a', header=False, index=False)
+    else:
+        df.to_csv(ARQUIVO, index=False)
+
+def roi():
+    if not os.path.exists(ARQUIVO):
+        return 0
+
+    df = pd.read_csv(ARQUIVO)
+
+    if df.empty:
+        return 0
+
+    lucro = df["lucro"].sum()
+    stake = df["stake"].sum()
+
+    return round((lucro / stake) * 100, 2) if stake > 0 else 0
+
+# ================= ANÁLISE =================
+def media_gols(jogos, tipo):
+    gols = []
+    for j in jogos:
+        if tipo == "home":
+            gols.append(j['goals']['home'] or 0)
+        else:
+            gols.append(j['goals']['away'] or 0)
+    return sum(gols)/len(gols) if gols else 1.2
+
+def analisar_jogo(jogo, ult_casa, ult_fora, banca):
+
+    casa = jogo['teams']['home']['name']
+    fora = jogo['teams']['away']['name']
+
+    xg_home = media_gols(ult_casa, "home")
+    xg_away = media_gols(ult_fora, "away")
+
+    xg_total = xg_home + xg_away
+
+    mercados = {
+        "Over 2.5": prob_over_25(xg_total),
+        "BTTS": prob_btts(xg_home, xg_away),
+    }
+
+    resultados = []
+
+    for nome, prob in mercados.items():
+        odd_justa = round(1 / prob, 2) if prob > 0 else 0
+        odd_mercado = ODD_PADRAO
+
+        ev = calcular_ev(prob, odd_mercado)
+
+        if ev >= EV_MINIMO:
+            stake = kelly(prob, odd_mercado, banca)
+
+            resultados.append({
+                "Jogo": f"{casa} x {fora}",
+                "Mercado": nome,
+                "Prob": round(prob, 2),
+                "Odd Justa": odd_justa,
+                "Odd Mercado": odd_mercado,
+                "EV": round(ev, 2),
+                "Stake": stake
+            })
+
+    return resultados
+
+# ================= STREAMLIT =================
+st.set_page_config(layout="wide")
+st.title("💰 ROBÔ PROFISSIONAL DE APOSTAS (NÍVEL CASA)")
+
+banca = st.sidebar.number_input("💰 Banca", value=1000)
+
+modo = st.sidebar.selectbox("Modo", ["Pré-live", "Ao vivo"])
+
+st.sidebar.metric("ROI", f"{roi()}%")
+
+status = st.empty()
+tabela = st.empty()
+
+alertados = set()
+
+while True:
+
+    status.warning("🔄 Analisando jogos...")
+
+    jogos = jogos_hoje() if modo == "Pré-live" else jogos_ao_vivo()
+
+    entradas = []
+
+    for j in jogos:
         try:
-            url = f"https://v3.football.api-sports.io/fixtures?date={data}&league={liga}"
-            res = requests.get(url, headers=headers, timeout=10).json()
-            jogos_total += res.get("response", [])
+            home_id = j['teams']['home']['id']
+            away_id = j['teams']['away']['id']
+
+            ult_casa = ultimos_jogos(home_id)
+            ult_fora = ultimos_jogos(away_id)
+
+            analises = analisar_jogo(j, ult_casa, ult_fora, banca)
+
+            for a in analises:
+                entradas.append(a)
+
+                chave = a["Jogo"] + a["Mercado"]
+
+                if chave not in alertados:
+                    msg = f"""
+🔥 VALUE BET
+
+{a['Jogo']}
+🎯 {a['Mercado']}
+
+📊 Prob: {a['Prob']}
+💰 Odd: {a['Odd Mercado']}
+📈 EV: {a['EV']}
+💸 Stake: R${a['Stake']}
+"""
+                    enviar(msg)
+
+                    salvar({
+                        "jogo": a["Jogo"],
+                        "mercado": a["Mercado"],
+                        "stake": a["Stake"],
+                        "lucro": 0
+                    })
+
+                    alertados.add(chave)
+
         except:
             continue
 
-    return jogos_total
-
-# ================= MODELO INTELIGENTE =================
-def prob_model(mercado):
-    if "Over 2.5" in mercado:
-        return 0.58
-    elif "Ambas" in mercado:
-        return 0.55
-    elif "Resultado 1" in mercado:
-        return 0.40
-    elif "Resultado X" in mercado:
-        return 0.28
-    elif "Resultado 2" in mercado:
-        return 0.32
-    elif "Escanteios" in mercado:
-        return 0.59
-    elif "Cartões" in mercado:
-        return 0.62
-    return 0.5
-
-# ================= ODDS =================
-def odds_model(mercado):
-    odds = {
-        "Over 2.5 Gols": 1.90,
-        "Ambas Marcam": 1.85,
-        "Resultado 1": 2.20,
-        "Resultado X": 3.10,
-        "Resultado 2": 3.00,
-        "Over 9.5 Escanteios": 1.95,
-        "Over 2.5 Cartões": 1.90
-    }
-    return odds.get(mercado, 1.80)
-
-# ================= APP =================
-st.title("💰 ROBÔ PROFISSIONAL - ANÁLISE COMPLETA DE JOGOS")
-
-banca = st.number_input("💰 Sua banca", value=1000)
-dias = st.slider("Dias para analisar", 0, 3, 0)
-modo_teste = st.checkbox("Modo Teste (ver tudo)")
-
-mercados = st.multiselect(
-    "Mercados para análise",
-    [
-        "Over 2.5 Gols",
-        "Ambas Marcam",
-        "Resultado 1",
-        "Resultado X",
-        "Resultado 2",
-        "Over 9.5 Escanteios",
-        "Over 2.5 Cartões"
-    ],
-    default=[
-        "Over 2.5 Gols",
-        "Ambas Marcam",
-        "Over 9.5 Escanteios",
-        "Over 2.5 Cartões"
-    ]
-)
-
-status = st.empty()
-
-# ================= LOOP =================
-while True:
-    status.warning("🔄 Analisando jogos...")
-
-    dados = []
-
-    datas = [
-        (datetime.datetime.utcnow() + datetime.timedelta(days=i)).strftime("%Y-%m-%d")
-        for i in range(dias + 1)
-    ]
-
-    for data in datas:
-        jogos = buscar_jogos(data)
-
-        for j in jogos:
-            try:
-                casa = j['teams']['home']['name']
-                fora = j['teams']['away']['name']
-                liga = j['league']['name']
-
-                for mercado in mercados:
-                    prob = prob_model(mercado)
-                    odd = odds_model(mercado)
-                    ev = calcular_ev(prob, odd)
-                    stake = kelly(prob, odd, banca)
-
-                    filtro = -1 if modo_teste else 0.05
-
-                    if ev >= filtro:
-                        dados.append([
-                            liga,
-                            f"{casa} x {fora}",
-                            mercado,
-                            round(prob, 2),
-                            odd,
-                            round(ev, 2),
-                            stake
-                        ])
-
-                        # ALERTA TELEGRAM
-                        if ev >= 0.08:
-                            enviar(
-                                f"💰 VALUE BET\n"
-                                f"{casa} x {fora}\n"
-                                f"{liga}\n"
-                                f"Mercado: {mercado}\n"
-                                f"Prob: {round(prob,2)}\n"
-                                f"Odd: {odd}\n"
-                                f"EV: {round(ev,2)}\n"
-                                f"Stake: R${stake}"
-                            )
-            except:
-                continue
-
-    if dados:
-        df = pd.DataFrame(dados, columns=[
-            "Liga", "Jogo", "Mercado", "Prob", "Odd", "EV", "Stake"
-        ])
-
-        df = df.sort_values(by="EV", ascending=False)
-        st.dataframe(df)
+    if entradas:
+        df = pd.DataFrame(entradas)
+        tabela.dataframe(df.sort_values(by="EV", ascending=False))
     else:
-        st.info("Nenhuma oportunidade encontrada")
+        tabela.info("Nenhuma oportunidade agora")
 
     time.sleep(120)
-
