@@ -1,42 +1,20 @@
 import streamlit as st
 import pandas as pd
-import datetime
 
-from utils import buscar_jogos_por_data
+from data import buscar_jogos
 from model import *
 from telegram import enviar
 
 st.set_page_config(layout="wide")
 st.title("🤖 ROBÔ IA PROFISSIONAL - BET365 STYLE")
 
-# ================= DATA =================
-col1, col2 = st.columns(2)
-
-with col1:
-    data_inicio = st.date_input("📅 Data inicial", datetime.date.today())
-
-with col2:
-    dias = st.slider("📆 Próximos dias", 1, 5, 2)
-
-# ================= BUSCAR JOGOS =================
-jogos_por_liga = {}
-
-for i in range(dias):
-    data = data_inicio + datetime.timedelta(days=i)
-    data_str = data.strftime("%Y-%m-%d")
-
-    dados = buscar_jogos_por_data(data_str)
-
-    for liga, jogos in dados.items():
-        if liga not in jogos_por_liga:
-            jogos_por_liga[liga] = []
-        jogos_por_liga[liga].extend(jogos)
+# ================= JOGOS =================
+jogos_por_liga = buscar_jogos()
 
 if not jogos_por_liga:
-    st.error("❌ Nenhum jogo encontrado")
+    st.error("❌ Nenhum jogo encontrado (API limitada ou sem jogos hoje)")
     st.stop()
 
-# ================= ESCOLHAS =================
 liga = st.selectbox("🏆 Campeonato", list(jogos_por_liga.keys()))
 jogos = jogos_por_liga[liga]
 
@@ -44,8 +22,8 @@ jogo_nome = st.selectbox("⚽ Jogo", [j["nome"] for j in jogos])
 
 modo_auto = st.checkbox("🤖 Modo automático (só valor alto)")
 
-# ================= ANALISAR =================
-if st.button("🔍 Analisar Jogo"):
+# ================= ANALISE =================
+if st.button("🔍 Analisar"):
 
     jogo = next(j for j in jogos if j["nome"] == jogo_nome)
 
@@ -74,16 +52,23 @@ if st.button("🔍 Analisar Jogo"):
         if modo_auto and ev < 0.05:
             continue
 
+        # COR VISUAL
         if ev > 0.10:
             sinal = "🟢 ENTRAR"
         elif ev > 0:
             sinal = "🟡 MÉDIO"
         else:
-            sinal = "🔴 EV-"
+            sinal = "🔴 RISCO"
 
         # TELEGRAM
         if ev > 0.12:
-            enviar(f"🔥 APOSTA DE VALOR\n{casa} x {fora}\n{nome}\nOdd: {odd_bet}\nEV: {round(ev,2)}")
+            enviar(f"""🔥 APOSTA DE VALOR
+
+{casa} x {fora}
+Mercado: {nome}
+Prob: {round(prob*100,1)}%
+Odd: {odd_bet}
+EV: {round(ev,2)}""")
 
         tabela.append([
             nome,
@@ -130,4 +115,4 @@ if st.button("🚀 SCANNER DO DIA"):
     else:
         st.info("Nenhuma entrada forte encontrada")
 
-st.success("🔥 Robô rodando estilo profissional")
+st.success("🔥 Robô rodando nível profissional")
