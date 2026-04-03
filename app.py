@@ -10,6 +10,7 @@ st.set_page_config(layout="wide")
 st.title("🤖 ROBÔ AUTÔNOMO IA - APOSTAS ESPORTIVAS")
 
 # ================= SCRAPING MULTI-LIGAS =================
+@st.cache_data(ttl=300)
 def buscar_jogos():
     ligas_urls = {
         "Brasileirão": "https://www.flashscore.com/football/brazil/serie-a/",
@@ -22,8 +23,8 @@ def buscar_jogos():
 
     for liga, url in ligas_urls.items():
         try:
-            r = requests.get(url, headers=headers)
-            soup = BeautifulSoup(r.text, "html.parser")
+            r = requests.get(url, headers=headers, timeout=10)
+            soup = BeautifulSoup(r.text, "lxml")
 
             partidas = soup.find_all("div", class_="event__match")
             jogos = []
@@ -47,7 +48,7 @@ def buscar_jogos():
 
     return todos_jogos
 
-# ================= MODELO IA =================
+# ================= MODELO =================
 def poisson(lmbda, k):
     return (lmbda**k * math.exp(-lmbda)) / math.factorial(k)
 
@@ -57,12 +58,9 @@ def prob_over(xg, linha):
 def prob_btts(xg_home, xg_away):
     return (1 - poisson(xg_home, 0)) * (1 - poisson(xg_away, 0))
 
-# IA simulando força dos times
-
 def gerar_xg():
-    return round(random.uniform(0.8, 2.2),2)
+    return round(random.uniform(0.8, 2.2), 2)
 
-# ================= EV =================
 def calcular_ev(prob, odd):
     return (prob * odd) - 1
 
@@ -74,23 +72,22 @@ liga = st.sidebar.selectbox("🏆 Campeonato", list(jogos_por_liga.keys()))
 jogos = jogos_por_liga[liga]
 
 if not jogos:
-    st.warning("Sem jogos encontrados (site pode ter mudado)")
+    st.warning("⚠️ Sem jogos encontrados (Flashscore pode ter mudado ou bloqueado)")
 
 nomes = [j["nome"] for j in jogos]
 
-jogo_escolhido = st.selectbox("⚽ Escolha o jogo", nomes)
+jogo_escolhido = st.selectbox("⚽ Escolha o jogo", nomes if nomes else ["Nenhum jogo"])
 
-modo_auto = st.checkbox("🤖 Modo IA Automático (escolher melhores entradas)")
+modo_auto = st.checkbox("🤖 Modo IA Automático")
 
 # ================= ANÁLISE =================
-if st.button("🔍 Analisar"):
+if st.button("🔍 Analisar") and jogos:
 
     jogo = next(j for j in jogos if j["nome"] == jogo_escolhido)
 
     casa = jogo["casa"]
     fora = jogo["fora"]
 
-    # IA gera expectativa
     xg_home = gerar_xg()
     xg_away = gerar_xg()
     xg_total = xg_home + xg_away
@@ -99,8 +96,8 @@ if st.button("🔍 Analisar"):
         ("Over 2.5 Gols", prob_over(xg_total, 3), 1.8),
         ("Over 1.5 Gols", prob_over(xg_total, 2), 1.4),
         ("Ambas Marcam", prob_btts(xg_home, xg_away), 1.85),
-        ("Over 9.5 Escanteios", random.uniform(0.5,0.7), 1.9),
-        ("Over 3.5 Cartões", random.uniform(0.5,0.7), 1.95)
+        ("Escanteios Over 9.5", random.uniform(0.5,0.7), 1.9),
+        ("Cartões Over 3.5", random.uniform(0.5,0.7), 1.95)
     ]
 
     tabela = []
@@ -108,16 +105,10 @@ if st.button("🔍 Analisar"):
     for nome, prob, odd in mercados:
         ev = calcular_ev(prob, odd)
 
-        if modo_auto:
-            if ev < 0.10:
-                continue
+        if modo_auto and ev < 0.10:
+            continue
 
-        tabela.append([
-            nome,
-            round(prob,2),
-            odd,
-            round(ev,2)
-        ])
+        tabela.append([nome, round(prob,2), odd, round(ev,2)])
 
     df = pd.DataFrame(tabela, columns=["Mercado","Prob","Odd","EV"])
 
