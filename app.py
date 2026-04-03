@@ -1,16 +1,14 @@
 import streamlit as st
-import requests
-import datetime
 
 # ================= CONFIGURAÇÃO =================
-API_KEY_FOOT = "f465d2868695fccca02d7204db0eaba"
-TOKEN = "8794081951:AAHriFzY5yj68sacN_JD4iuoZ4h8H3Su6TY"
-CHAT_ID = "6661035382"
+TOKEN = "SEU_TOKEN"
+CHAT_ID = "SEU_CHAT_ID"
 
 # ================= TELEGRAM =================
 def enviar(msg):
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
     try:
+        import requests
         requests.post(url, data={"chat_id": CHAT_ID, "text": msg})
     except:
         pass
@@ -25,87 +23,70 @@ def kelly(prob, odd, banca):
     stake = (b * prob - q) / b
     return max(0, round(stake * banca, 2))
 
-def prob_pre_jogo(odd):
-    return 1 / odd
+# ================= PROBABILIDADES SIMULADAS =================
+def prob_pre_gols():
+    return 0.55  # Over 2.5
 
-def prob_escanteios(time_casa, time_fora):
-    # Probabilidade estimada de over 9.5 escanteios
-    return 0.6  # valor de teste, depois pode ser ajustado com estatísticas reais
+def prob_ambas_marcam():
+    return 0.5
 
-def prob_cartoes(time_casa, time_fora):
-    # Probabilidade estimada de over 2.5 cartões
-    return 0.55  # valor de teste, depois pode ser ajustado com estatísticas reais
+def prob_resultado():
+    return 0.35  # qualquer resultado individual
 
-# ================= BUSCAR JOGO =================
-def buscar_jogo_especifico(campeonato, data, time_casa, time_fora):
-    url = f"https://v3.football.api-sports.io/fixtures?date={data}"
-    headers = {"x-apisports-key": API_KEY_FOOT}
-    try:
-        res = requests.get(url, headers=headers, timeout=10).json().get("response", [])
-        for j in res:
-            home = j.get("teams", {}).get("home", {}).get("name")
-            away = j.get("teams", {}).get("away", {}).get("name")
-            league = j.get("league", {}).get("name")
-            if home == time_casa and away == time_fora and league == campeonato:
-                return j
-        return None
-    except:
-        return None
+def prob_escanteios():
+    return 0.6  # Over 9.5 escanteios
+
+def prob_cartoes():
+    return 0.55  # Over 2.5 cartões
 
 # ================= STREAMLIT =================
-st.title("💰 TESTE PRÉ-LIVE - SÉRIE A 04/04/2026")
+st.title("💰 SIMULAÇÃO PRÉ-LIVE - São Paulo x Cruzeiro 04/04/2026")
 
 banca = st.number_input("💰 Sua banca", value=1000)
 
-# Definindo jogo específico
-campeonato = "Serie A"
-data = "2026-04-04"
+# Seleção de mercados
+mercados = st.multiselect(
+    "Selecione mercados",
+    ["Over 2.5 Gols","Ambas Marcam","Resultado 1","Resultado X","Resultado 2",
+     "Over 9.5 Escanteios","Over 2.5 Cartões"],
+    default=["Over 2.5 Gols","Ambas Marcam","Resultado 1","Resultado X","Resultado 2",
+             "Over 9.5 Escanteios","Over 2.5 Cartões"]
+)
+
 time_casa = "São Paulo"
 time_fora = "Cruzeiro"
 
-jogo = buscar_jogo_especifico(campeonato, data, time_casa, time_fora)
+tabela = []
+for mercado in mercados:
+    if mercado == "Over 2.5 Gols":
+        prob = prob_pre_gols()
+        odd = 1.8
+    elif mercado == "Ambas Marcam":
+        prob = prob_ambas_marcam()
+        odd = 1.85
+    elif mercado.startswith("Resultado"):
+        prob = prob_resultado()
+        odd = 2.5
+    elif mercado == "Over 9.5 Escanteios":
+        prob = prob_escanteios()
+        odd = 1.9
+    elif mercado == "Over 2.5 Cartões":
+        prob = prob_cartoes()
+        odd = 1.95
+    else:
+        prob = 0.5
+        odd = 1.8
 
-if jogo:
-    st.subheader(f"{time_casa} x {time_fora} - Pré-Live")
-    
-    # Seleção de mercados
-    mercados = st.multiselect(
-        "Selecione mercados",
-        ["Over 2.5 Gols","Ambas Marcam","Resultado 1","Resultado X","Resultado 2",
-         "Over 9.5 Escanteios","Over 2.5 Cartões"],
-        default=["Over 2.5 Gols","Ambas Marcam","Resultado 1","Resultado X","Resultado 2",
-                 "Over 9.5 Escanteios","Over 2.5 Cartões"]
-    )
+    ev = calcular_ev(prob, odd)
+    stake = kelly(prob, odd, banca)
 
-    tabela = []
-    for mercado in mercados:
-        if mercado.startswith("Resultado"):
-            odd = 2.5
-            prob = prob_pre_jogo(odd)
-        elif mercado == "Over 2.5 Gols":
-            odd = 1.8
-            prob = prob_pre_jogo(odd)
-        elif mercado == "Ambas Marcam":
-            odd = 1.85
-            prob = prob_pre_jogo(odd)
-        elif mercado == "Over 9.5 Escanteios":
-            odd = 1.9
-            prob = prob_escanteios(time_casa, time_fora)
-        elif mercado == "Over 2.5 Cartões":
-            odd = 1.95
-            prob = prob_cartoes(time_casa, time_fora)
-        else:
-            odd = 1.8
-            prob = 0.5
+    tabela.append([mercado, round(prob,2), odd, round(ev,2), stake])
 
-        ev = calcular_ev(prob, odd)
-        stake = kelly(prob, odd, banca)
-        
-        tabela.append([mercado, round(prob,2), odd, round(ev,2), stake])
-        
-        if ev >= 0.15:
-            enviar(f"💰 TESTE PRÉ-LIVE\n{time_casa} x {time_fora}\nMercado: {mercado}\nProb: {round(prob,2)}\nOdd: {odd}\nEV: {round(ev,2)}\nStake: R${stake}")
+    # Alerta Telegram para EV >= 0.15
+    if ev >= 0.15:
+        enviar(f"💰 SIMULAÇÃO PRÉ-LIVE\n{time_casa} x {time_fora}\nMercado: {mercado}\nProb: {round(prob,2)}\nOdd: {odd}\nEV: {round(ev,2)}\nStake: R${stake}")
 
-    df = st.dataframe(tabela, columns=["Mercado","Prob","Odd","EV","Stake"])
-else:
-    st.warning("Jogo não encontrado ou ainda não disponível na API")
+st.subheader(f"{time_casa} x {time_fora} - Mercados Pré-Live Simulados")
+import pandas as pd
+df = pd.DataFrame(tabela, columns=["Mercado","Prob","Odd","EV","Stake"])
+st.dataframe(df)
