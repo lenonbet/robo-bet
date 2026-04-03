@@ -77,7 +77,6 @@ def gerar_mercados(jogo, banca, mercados_selecionados, ao_vivo=False):
     g2 = jogo.get('goals', {}).get('away') or 0
     total = g1 + g2
 
-    resultados = []
     if "Over 2.5" in mercados_selecionados:
         odd = round(1.8,2)
         prob = prob_ao_vivo(total, tempo) if ao_vivo else prob_pre_jogo(odd)
@@ -103,12 +102,16 @@ def gerar_mercados(jogo, banca, mercados_selecionados, ao_vivo=False):
     return mercados, casa, fora, tempo
 
 # ================= STREAMLIT =================
-st.title("💰 ROBÔ PROFISSIONAL - FUTEBOL AO VIVO & PRÉ-JOGO")
+st.title("💰 ROBÔ PROFISSIONAL DE FUTEBOL - AO VIVO & PRÉ-JOGO")
 
 banca = st.number_input("💰 Sua banca", value=1000)
 modo = st.selectbox("Modo de Análise", ["PRÉ-JOGO","AO VIVO","TODOS"])
 manual = st.checkbox("Selecionar jogos manualmente")
-mercados_selecionados = st.multiselect("Selecione mercados a analisar", ["Over 2.5","Ambas Marcam","Resultado 1","Resultado X","Resultado 2"], default=["Over 2.5","Ambas Marcam","Resultado 1","Resultado X","Resultado 2"])
+mercados_selecionados = st.multiselect(
+    "Selecione mercados a analisar",
+    ["Over 2.5","Ambas Marcam","Resultado 1","Resultado X","Resultado 2"],
+    default=["Over 2.5","Ambas Marcam","Resultado 1","Resultado X","Resultado 2"]
+)
 dias_futuros = st.slider("Quantos dias à frente analisar?", 0, 3, 0)
 
 status = st.empty()
@@ -158,4 +161,3 @@ while True:
     st.dataframe(carregar_historico())
 
     time.sleep(180)
-   
