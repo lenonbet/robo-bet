@@ -1,11 +1,13 @@
 import requests
 
+API_KEY = "SUA_API_AQUI"
+
 def buscar_jogos():
 
     url = "https://api.football-data.org/v4/matches"
-    
+
     headers = {
-        "X-Auth-Token": "SUA_API_GRATUITA_AQUI"
+        "X-Auth-Token": API_KEY
     }
 
     try:
