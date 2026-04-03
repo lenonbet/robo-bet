@@ -2,14 +2,19 @@ import streamlit as st
 import requests
 import pandas as pd
 import time
+import datetime
 import random
 
-# ================= CONFIG =================
+# ================= CONFIGURAÇÃO =================
 API_KEY = "f465d2868695fccca02d7204db0eaba"
 TOKEN = "8794081951:AAHriFzY5yj68sacN_JD4iuoZ4h8H3Su6TY"
 CHAT_ID = "6661035382"
-
 alertas = set()
+
+# Principais campeonatos do dia
+PRINCIPAIS_CAMPEONATOS = [
+    "Premier League", "La Liga", "Serie A", "Bundesliga", "Ligue 1", "Champions League"
+]
 
 # ================= TELEGRAM =================
 def enviar(msg):
@@ -33,8 +38,11 @@ def kelly(prob, odd, banca):
     return max(0, round(stake * banca, 2))
 
 # ================= BUSCAR JOGOS =================
-def buscar_jogos_ao_vivo():
-    url = "https://v3.football.api-sports.io/fixtures?live=all"
+def buscar_jogos_hoje(live=False):
+    hoje = datetime.datetime.now().strftime("%Y-%m-%d")
+    url = f"https://v3.football.api-sports.io/fixtures?date={hoje}"
+    if live:
+        url += "&live=all"
     headers = {"x-apisports-key": API_KEY}
     try:
         res = requests.get(url, headers=headers, timeout=10).json()
@@ -42,14 +50,8 @@ def buscar_jogos_ao_vivo():
     except:
         return []
 
-def buscar_pre_jogos():
-    url = "https://v3.football.api-sports.io/fixtures?status=NS"
-    headers = {"x-apisports-key": API_KEY}
-    try:
-        res = requests.get(url, headers=headers, timeout=10).json()
-        return res.get("response", [])
-    except:
-        return []
+def filtrar_principais(jogos):
+    return [j for j in jogos if j['league']['name'] in PRINCIPAIS_CAMPEONATOS]
 
 # ================= MODELO =================
 def calcular_probabilidade_ao_vivo(gols, tempo):
@@ -65,7 +67,7 @@ def calcular_probabilidade_pre_jogo(odd):
 
 # ================= ANÁLISE AO VIVO =================
 def analisar_ao_vivo(banca, ev_min=0.05, tempo_min=10):
-    jogos = buscar_jogos_ao_vivo()
+    jogos = filtrar_principais(buscar_jogos_hoje(live=True))
     dados = []
 
     for j in jogos:
@@ -81,6 +83,7 @@ def analisar_ao_vivo(banca, ev_min=0.05, tempo_min=10):
                 continue
 
             prob = calcular_probabilidade_ao_vivo(total, tempo)
+            # odds simuladas realistas
             odd = round(random.uniform(1.65, 1.9), 2)
             ev = calcular_ev(prob, odd)
             if ev < ev_min:
@@ -111,13 +114,14 @@ def analisar_ao_vivo(banca, ev_min=0.05, tempo_min=10):
 
 # ================= ANÁLISE PRÉ-JOGO =================
 def analisar_pre_jogos(banca, ev_min=0.05):
-    jogos = buscar_pre_jogos()
+    jogos = filtrar_principais(buscar_jogos_hoje(live=False))
     dados = []
 
     for j in jogos:
         try:
             casa = j['teams']['home']['name']
             fora = j['teams']['away']['name']
+            # odds simuladas realistas
             odd = round(random.uniform(1.65, 1.9), 2)
             prob = calcular_probabilidade_pre_jogo(odd)
             ev = calcular_ev(prob, odd)
@@ -147,14 +151,12 @@ def analisar_pre_jogos(banca, ev_min=0.05):
 
 # ================= APP =================
 st.title("💰 ROBÔ TOP 1% - VALUE BET AO VIVO & PRÉ-JOGO")
-
 banca = st.number_input("💰 Sua banca", value=1000)
-
 status = st.empty()
 
-# Atualização automática a cada 3 minutos
 while True:
-    status.warning("🔄 Analisando jogos AO VIVO...")
+    status.warning("🔄 Analisando jogos AO VIVO e PRÉ-JOGO...")
+
     dados_ao_vivo = analisar_ao_vivo(banca)
     dados_pre_jogo = analisar_pre_jogos(banca)
 
@@ -173,8 +175,3 @@ while True:
         st.info("Nenhuma entrada forte PRÉ-JOGO agora")
 
     time.sleep(180)
-
-
-
-
-
