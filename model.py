@@ -1,10 +1,6 @@
 import math
 import random
 
-# força simulada (pode crescer depois)
-def forca_time():
-    return random.uniform(1.2, 2.3)
-
 def poisson(lmbda, k):
     return (lmbda**k * math.exp(-lmbda)) / math.factorial(k)
 
@@ -18,9 +14,7 @@ def prob_btts(xg_home, xg_away):
     return (1 - poisson(xg_home, 0)) * (1 - poisson(xg_away, 0))
 
 def odd_justa(prob):
-    if prob <= 0:
-        return 0
-    return round(1 / prob, 2)
+    return round(1 / prob, 2) if prob > 0 else 0
 
 def odd_mercado(prob):
     margem = random.uniform(0.90, 0.95)
