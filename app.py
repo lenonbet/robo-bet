@@ -48,22 +48,17 @@ def kelly(prob, odd, banca):
     return max(0, round(k * banca * KELLY_FRACAO, 2))
 
 # ================= DADOS =================
-def jogos_hoje():
-    url = "https://v3.football.api-sports.io/fixtures?next=30"
-    return requests.get(url, headers=headers).json().get("response", [])
-
-def jogos_ao_vivo():
-    url = "https://v3.football.api-sports.io/fixtures?live=all"
+def buscar_jogos():
+    url = "https://v3.football.api-sports.io/fixtures?next=50"
     return requests.get(url, headers=headers).json().get("response", [])
 
 def ultimos_jogos(team_id):
     url = f"https://v3.football.api-sports.io/fixtures?team={team_id}&last=5"
     return requests.get(url, headers=headers).json().get("response", [])
 
-# ================= IA SIMPLES =================
+# ================= IA =================
 def salvar(dados):
     df = pd.DataFrame([dados])
-
     if os.path.exists(ARQUIVO):
         df.to_csv(ARQUIVO, mode='a', header=False, index=False)
     else:
@@ -72,15 +67,11 @@ def salvar(dados):
 def roi():
     if not os.path.exists(ARQUIVO):
         return 0
-
     df = pd.read_csv(ARQUIVO)
-
     if df.empty:
         return 0
-
     lucro = df["lucro"].sum()
     stake = df["stake"].sum()
-
     return round((lucro / stake) * 100, 2) if stake > 0 else 0
 
 # ================= ANÁLISE =================
@@ -93,14 +84,20 @@ def media_gols(jogos, tipo):
             gols.append(j['goals']['away'] or 0)
     return sum(gols)/len(gols) if gols else 1.2
 
-def analisar_jogo(jogo, ult_casa, ult_fora, banca):
+def analisar(jogo, banca):
 
     casa = jogo['teams']['home']['name']
     fora = jogo['teams']['away']['name']
+    liga = jogo['league']['name']
+
+    home_id = jogo['teams']['home']['id']
+    away_id = jogo['teams']['away']['id']
+
+    ult_casa = ultimos_jogos(home_id)
+    ult_fora = ultimos_jogos(away_id)
 
     xg_home = media_gols(ult_casa, "home")
     xg_away = media_gols(ult_fora, "away")
-
     xg_total = xg_home + xg_away
 
     mercados = {
@@ -111,58 +108,86 @@ def analisar_jogo(jogo, ult_casa, ult_fora, banca):
     resultados = []
 
     for nome, prob in mercados.items():
-        odd_justa = round(1 / prob, 2) if prob > 0 else 0
-        odd_mercado = ODD_PADRAO
-
-        ev = calcular_ev(prob, odd_mercado)
+        odd = ODD_PADRAO
+        ev = calcular_ev(prob, odd)
 
         if ev >= EV_MINIMO:
-            stake = kelly(prob, odd_mercado, banca)
+            stake = kelly(prob, odd, banca)
 
             resultados.append({
+                "Liga": liga,
                 "Jogo": f"{casa} x {fora}",
                 "Mercado": nome,
-                "Prob": round(prob, 2),
-                "Odd Justa": odd_justa,
-                "Odd Mercado": odd_mercado,
-                "EV": round(ev, 2),
+                "Prob": round(prob,2),
+                "Odd": odd,
+                "EV": round(ev,2),
                 "Stake": stake
             })
 
     return resultados
 
-# ================= STREAMLIT =================
+# ================= UI =================
 st.set_page_config(layout="wide")
-st.title("💰 ROBÔ PROFISSIONAL DE APOSTAS (NÍVEL CASA)")
+st.title("💰 ROBÔ PROFISSIONAL COMPLETO")
 
-banca = st.sidebar.number_input("💰 Banca", value=1000)
+banca = st.sidebar.number_input("Banca", value=1000)
 
-modo = st.sidebar.selectbox("Modo", ["Pré-live", "Ao vivo"])
+modo = st.sidebar.selectbox("Modo", ["Automático", "Manual"])
 
 st.sidebar.metric("ROI", f"{roi()}%")
 
-status = st.empty()
-tabela = st.empty()
+jogos = buscar_jogos()
 
-alertados = set()
+# ================= LISTA DE JOGOS =================
+st.subheader("📊 Jogos do dia")
 
-while True:
+lista_jogos = []
+mapa_jogos = {}
 
-    status.warning("🔄 Analisando jogos...")
+for j in jogos:
+    nome = f"{j['league']['name']} | {j['teams']['home']['name']} x {j['teams']['away']['name']}"
+    lista_jogos.append(nome)
+    mapa_jogos[nome] = j
 
-    jogos = jogos_hoje() if modo == "Pré-live" else jogos_ao_vivo()
+# ================= SELEÇÃO =================
+selecionados = st.multiselect("Escolha jogos", lista_jogos)
 
-    entradas = []
+# ================= MERCADOS =================
+mercados_select = st.multiselect(
+    "Mercados",
+    ["Over 2.5", "BTTS"],
+    default=["Over 2.5","BTTS"]
+)
 
-    for j in jogos:
-        try:
-            home_id = j['teams']['home']['id']
-            away_id = j['teams']['away']['id']
+# ================= EXECUÇÃO =================
+if modo == "Manual":
+    if st.button("Analisar selecionados"):
+        entradas = []
 
-            ult_casa = ultimos_jogos(home_id)
-            ult_fora = ultimos_jogos(away_id)
+        for nome in selecionados:
+            jogo = mapa_jogos[nome]
+            analises = analisar(jogo, banca)
 
-            analises = analisar_jogo(j, ult_casa, ult_fora, banca)
+            for a in analises:
+                if a["Mercado"] in mercados_select:
+                    entradas.append(a)
+
+        if entradas:
+            df = pd.DataFrame(entradas)
+            st.dataframe(df.sort_values(by="EV", ascending=False))
+        else:
+            st.warning("Sem oportunidades")
+
+# ================= AUTOMÁTICO =================
+if modo == "Automático":
+    placeholder = st.empty()
+    alertados = set()
+
+    while True:
+        entradas = []
+
+        for j in jogos:
+            analises = analisar(j, banca)
 
             for a in analises:
                 entradas.append(a)
@@ -170,35 +195,19 @@ while True:
                 chave = a["Jogo"] + a["Mercado"]
 
                 if chave not in alertados:
-                    msg = f"""
-🔥 VALUE BET
-
-{a['Jogo']}
-🎯 {a['Mercado']}
-
-📊 Prob: {a['Prob']}
-💰 Odd: {a['Odd Mercado']}
-📈 EV: {a['EV']}
-💸 Stake: R${a['Stake']}
-"""
-                    enviar(msg)
-
+                    enviar(str(a))
                     salvar({
                         "jogo": a["Jogo"],
                         "mercado": a["Mercado"],
                         "stake": a["Stake"],
                         "lucro": 0
                     })
-
                     alertados.add(chave)
 
-        except:
-            continue
+        if entradas:
+            df = pd.DataFrame(entradas)
+            placeholder.dataframe(df.sort_values(by="EV", ascending=False))
+        else:
+            placeholder.warning("Sem oportunidades")
 
-    if entradas:
-        df = pd.DataFrame(entradas)
-        tabela.dataframe(df.sort_values(by="EV", ascending=False))
-    else:
-        tabela.info("Nenhuma oportunidade agora")
-
-    time.sleep(120)
+        time.sleep(120)
