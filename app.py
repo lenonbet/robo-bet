@@ -3,16 +3,17 @@ import pandas as pd
 
 from data import buscar_jogos
 from model import *
+from stats import gerar_stats
 from telegram import enviar
 
 st.set_page_config(layout="wide")
-st.title("🤖 ROBÔ IA PROFISSIONAL - BET365 STYLE")
+st.title("🤖 ROBÔ IA ULTRA - BET365 STYLE")
 
 # ================= JOGOS =================
 jogos_por_liga = buscar_jogos()
 
 if not jogos_por_liga:
-    st.error("❌ Nenhum jogo encontrado (API limitada ou sem jogos hoje)")
+    st.error("❌ Nenhum jogo encontrado")
     st.stop()
 
 liga = st.selectbox("🏆 Campeonato", list(jogos_por_liga.keys()))
@@ -20,10 +21,10 @@ jogos = jogos_por_liga[liga]
 
 jogo_nome = st.selectbox("⚽ Jogo", [j["nome"] for j in jogos])
 
-modo_auto = st.checkbox("🤖 Modo automático (só valor alto)")
+modo_auto = st.checkbox("🤖 Modo IA automático")
 
 # ================= ANALISE =================
-if st.button("🔍 Analisar"):
+if st.button("🔍 Analisar Jogo"):
 
     jogo = next(j for j in jogos if j["nome"] == jogo_nome)
 
@@ -33,10 +34,14 @@ if st.button("🔍 Analisar"):
     xg_home, xg_away = calcular_xg()
     xg_total = xg_home + xg_away
 
+    stats = gerar_stats(xg_home, xg_away)
+
     mercados = [
         ("Over 2.5 Gols", prob_over(xg_total, 3)),
         ("Over 1.5 Gols", prob_over(xg_total, 2)),
         ("Ambas Marcam", prob_btts(xg_home, xg_away)),
+        ("Escanteios Over 9.5", prob_escanteios(stats)),
+        ("Cartões Over 3.5", prob_cartoes(stats)),
         ("Casa vence", xg_home / xg_total),
         ("Fora vence", xg_away / xg_total),
     ]
@@ -52,20 +57,18 @@ if st.button("🔍 Analisar"):
         if modo_auto and ev < 0.05:
             continue
 
-        # COR VISUAL
         if ev > 0.10:
-            sinal = "🟢 ENTRAR"
+            sinal = "🟢 FORTE"
         elif ev > 0:
             sinal = "🟡 MÉDIO"
         else:
             sinal = "🔴 RISCO"
 
-        # TELEGRAM
         if ev > 0.12:
-            enviar(f"""🔥 APOSTA DE VALOR
+            enviar(f"""🔥 ENTRADA FORTE
 
 {casa} x {fora}
-Mercado: {nome}
+{nome}
 Prob: {round(prob*100,1)}%
 Odd: {odd_bet}
 EV: {round(ev,2)}""")
@@ -80,15 +83,15 @@ EV: {round(ev,2)}""")
         ])
 
     df = pd.DataFrame(tabela, columns=[
-        "Mercado","Probabilidade","Odd Justa","Odd Mercado","EV","Sinal"
+        "Mercado","Probabilidade","Odd Justa","Odd Bet365","EV","Sinal"
     ])
 
-    st.subheader(f"📊 {casa} x {fora}")
-    st.write(f"xG: {round(xg_home,2)} x {round(xg_away,2)}")
+    st.subheader(f"{casa} x {fora}")
+    st.write("📊 Estatísticas simuladas:", stats)
     st.dataframe(df)
 
 # ================= SCANNER =================
-if st.button("🚀 SCANNER DO DIA"):
+if st.button("🚀 SCANNER ULTRA"):
 
     sinais = []
 
@@ -103,16 +106,12 @@ if st.button("🚀 SCANNER DO DIA"):
             ev = calcular_ev(prob, odd)
 
             if ev > 0.12:
-                sinais.append([
-                    liga,
-                    j["nome"],
-                    round(ev,2)
-                ])
+                sinais.append([liga, j["nome"], round(ev,2)])
 
     if sinais:
         df = pd.DataFrame(sinais, columns=["Liga","Jogo","EV"])
         st.dataframe(df.sort_values(by="EV", ascending=False))
     else:
-        st.info("Nenhuma entrada forte encontrada")
+        st.info("Sem entradas fortes")
 
-st.success("🔥 Robô rodando nível profissional")
+st.success("🔥 ROBÔ ULTRA ATIVO")
